@@ -6,10 +6,11 @@ This document defines the technical design for the Patient Appointment Booking M
 
 ## 2. Architecture
 
-Implement the application as a web client, authenticated application API, and relational database.
+Implement the application as an Angular single-page application, Spring Boot REST API, and relational database.
 
-- The web client renders separate patient and clinic-staff views from the authenticated user's role.
-- The API owns authorization, validation, booking transactions, and status changes. The client must not be trusted to enforce access rules.
+- Angular renders separate patient and clinic-staff views from the authenticated user's role and calls the API through Angular services.
+- Spring Boot owns authorization, validation, booking transactions, and status changes. The Angular client must not be trusted to enforce access rules.
+- Spring Security authenticates requests and exposes the authenticated user ID and role to controllers and services.
 - The relational database stores users, doctors, slots, and appointment history and enforces booking exclusivity.
 - Store timestamps as UTC and convert them to the clinic's display timezone only at the client boundary.
 
@@ -34,7 +35,7 @@ CREATE UNIQUE INDEX appointments_one_active_booking_per_slot
 
 ## 4. Authorization
 
-Authentication establishes a server-side identity containing the user ID and role. Every API route must derive the acting user from that identity and never accept an actor or patient ID from the client as authorization evidence.
+Spring Security establishes a server-side identity containing the user ID and role. Every Spring MVC controller and service must derive the acting user from that identity and never accept an actor or patient ID from the Angular client as authorization evidence.
 
 | Capability | Patient | Clinic staff |
 | --- | --- | --- |
@@ -59,7 +60,7 @@ Patient appointment queries must include `patient_id = authenticated_user_id`. D
 | `PATCH /appointments/{id}/cancel` | Patient or staff | Sets a permitted appointment to `cancelled` without deleting it. |
 | `PATCH /appointments/{id}/status` | Clinic staff | Sets a booking to `completed` or `cancelled`. |
 
-`POST /appointments` must run in a database transaction. It must verify that the slot is future and has no active booking, insert the `booked` appointment, and commit. If a concurrent request inserts first, translate the unique-index conflict into a failed booking response that displays **“This slot is no longer available.”** The transaction must roll back on every failure.
+The Spring Boot booking service handling `POST /appointments` must run in a `@Transactional` database transaction. It must verify that the slot is future and has no active booking, insert the `booked` appointment, and commit. If a concurrent request inserts first, translate the database unique-constraint violation into a conflict response that the Angular client displays as **“This slot is no longer available.”** The transaction must roll back on every failure.
 
 Cancellation must update an existing appointment rather than delete it. A patient cancellation must reject appointments at or after their start time. Staff cancellation must only make a future slot available again; a past slot remains excluded from availability because availability also requires `start_at > current time`.
 
@@ -77,6 +78,7 @@ Cancellation must update an existing appointment rather than delete it. A patien
 - The doctor directory displays each doctor's name and specialty.
 - The patient slot list contains only future available slots.
 - A successful booking displays a confirmation and the appointment appears in the patient's appointment list.
+- Angular route guards may tailor navigation by role, but Spring Security remains the authorization boundary.
 - Patient and staff appointment lists display status, including retained `cancelled` records.
 - Staff booking management provides date and doctor filters and controls for `completed` and `cancelled` statuses.
 
